@@ -48,6 +48,8 @@
 #define DEFAULT_NUM_WORKSPACES 1
 #define DEFAULT_WORKSPACE_CHANGE_ANIMATION_LENGTH 200
 
+extern float pointer_angle;
+
 struct focus_state {
 	struct desktop_shell *shell;
 	struct weston_seat *seat;
@@ -163,6 +165,12 @@ struct shell_touch_grab {
 struct weston_move_grab {
 	struct shell_grab base;
 	wl_fixed_t dx, dy;
+	struct weston_matrix rotation;
+	float initial_rotation;
+	struct {
+		float x;
+		float y;
+	} center;
 	bool client_initiated;
 };
 
@@ -1513,9 +1521,57 @@ move_grab_button(struct weston_pointer_grab *grab,
 
 	if (pointer->button_count == 0 &&
 	    state == WL_POINTER_BUTTON_STATE_RELEASED) {
+		struct weston_move_grab *move =
+			container_of(grab, struct weston_move_grab, base.grab);
+		struct shell_surface *shsurf = move->base.shsurf;
+		weston_matrix_multiply(&shsurf->rotation.rotation,
+					       &move->rotation);
 		shell_grab_end(shell_grab);
 		free(grab);
 	}
+}
+
+static void
+move_grab_axis(struct weston_pointer_grab *grab,
+	       const struct timespec *time,
+	       struct weston_pointer_axis_event *event)
+{
+	struct weston_move_grab *move = (struct weston_move_grab *) grab;
+	struct shell_surface *shsurf = move->base.shsurf;
+	struct weston_surface *surface;
+	float cx, cy;
+
+	if (!shsurf)
+		return;
+
+	surface = weston_desktop_surface_get_surface(shsurf->desktop_surface);
+
+	cx = move->center.x;
+	cy = move->center.y;
+
+	wl_list_remove(&shsurf->rotation.transform.link);
+	weston_view_geometry_dirty(shsurf->view);
+
+	struct weston_matrix *matrix =
+		&shsurf->rotation.transform.matrix;
+
+	float cumulative_rotation = pointer_angle - move->initial_rotation;
+	weston_matrix_init(&move->rotation);
+	float s = sin(cumulative_rotation);
+	float c = cos(cumulative_rotation);
+	weston_matrix_rotate_xy(&move->rotation, c, s);
+
+	weston_matrix_init(matrix);
+	weston_matrix_translate(matrix, -cx, -cy, 0.0f);
+	weston_matrix_multiply(matrix, &shsurf->rotation.rotation);
+	weston_matrix_multiply(matrix, &move->rotation);
+	weston_matrix_translate(matrix, cx, cy, 0.0f);
+
+	wl_list_insert(
+		&shsurf->view->geometry.transformation_list,
+		&shsurf->rotation.transform.link);
+
+	weston_compositor_schedule_repaint(surface->compositor);
 }
 
 static void
@@ -1532,7 +1588,7 @@ static const struct weston_pointer_grab_interface move_grab_interface = {
 	noop_grab_focus,
 	move_grab_motion,
 	move_grab_button,
-	noop_grab_axis,
+	move_grab_axis,
 	noop_grab_axis_source,
 	noop_grab_frame,
 	move_grab_cancel,
@@ -1561,6 +1617,13 @@ surface_move(struct shell_surface *shsurf, struct weston_pointer *pointer,
 	move->dy = wl_fixed_from_double(shsurf->view->geometry.y) -
 		   pointer->grab_y;
 	move->client_initiated = client_initiated;
+	move->initial_rotation = pointer_angle;
+	weston_matrix_init(&move->rotation);
+
+	int32_t x, y;
+	weston_view_from_global_fixed(shsurf->view, pointer->grab_x, pointer->grab_y, &x, &y);
+	move->center.x = wl_fixed_to_double(x);
+	move->center.y = wl_fixed_to_double(y);
 
 	shell_grab_start(&move->base, &move_grab_interface, shsurf,
 			 pointer, WESTON_DESKTOP_SHELL_CURSOR_MOVE);
