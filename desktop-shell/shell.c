@@ -2625,6 +2625,47 @@ get_maximized_size(struct shell_surface *shsurf, int32_t *width, int32_t *height
 	*height = area.height;
 }
 
+struct {
+	struct weston_matrix matrix;
+	struct wl_list link;
+} fullscreen_transform;
+struct weston_binding* fullscreen_key_binding = NULL;
+static void update_fullscreen_transform(struct weston_surface* surface, struct shell_surface* shsurf) {
+	weston_matrix_init(&fullscreen_transform.matrix);
+	float cx = surface->width/2.0;
+	float cy = surface->height/2.0;
+	weston_matrix_translate(&fullscreen_transform.matrix, -cx, -cy, 0);
+	weston_matrix_scale(&fullscreen_transform.matrix, 1.2, 1.2, 1);
+	weston_matrix_rotate_xy(&fullscreen_transform.matrix, cos(pointer_angle), sin(pointer_angle));
+	weston_matrix_translate(&fullscreen_transform.matrix, cx, cy, 0);
+	shsurf->view->transform.enabled = true;
+	weston_view_geometry_dirty(shsurf->view);
+	weston_surface_damage(surface);
+}
+
+static void
+surface_fullscreen_rotate_binding(struct weston_pointer *pointer,
+			const struct timespec *time,
+			struct weston_pointer_axis_event *event,
+			void *data)
+{
+	struct shell_surface *shsurf;
+	struct weston_surface *focus = pointer->focus->surface;
+	struct weston_surface *surface;
+
+	/* XXX: broken for windows containing sub-surfaces */
+	surface = weston_surface_get_main_surface(focus);
+	if (surface == NULL)
+		return;
+
+	shsurf = get_shell_surface(surface);
+	if (!shsurf)
+		return;
+
+	if (weston_desktop_surface_get_fullscreen(shsurf->desktop_surface))
+		update_fullscreen_transform(surface, shsurf);
+}
+
 static void
 set_fullscreen(struct shell_surface *shsurf, bool fullscreen,
 	       struct weston_output *output)
@@ -2653,6 +2694,17 @@ set_fullscreen(struct shell_surface *shsurf, bool fullscreen,
 	}
 	weston_desktop_surface_set_fullscreen(desktop_surface, fullscreen);
 	weston_desktop_surface_set_size(desktop_surface, width, height);
+
+	if (fullscreen) {
+		wl_list_insert(&shsurf->view->geometry.transformation_list, &fullscreen_transform.link);
+		update_fullscreen_transform(surface, shsurf);
+		fullscreen_key_binding = weston_compositor_add_axis_binding(
+				surface->compositor, WL_POINTER_AXIS_VERTICAL_SCROLL,
+				0, surface_fullscreen_rotate_binding, NULL);
+	} else {
+		wl_list_remove(&fullscreen_transform.link);
+		weston_binding_destroy(fullscreen_key_binding);
+	}
 }
 
 static void
