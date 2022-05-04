@@ -1721,6 +1721,7 @@ weston_pointer_move_to(struct weston_pointer *pointer,
 		weston_view_set_position(pointer->sprite,
 					 ix - pointer->hotspot_x,
 					 iy - pointer->hotspot_y);
+
 		weston_view_schedule_repaint(pointer->sprite);
 	}
 
@@ -2702,6 +2703,8 @@ pointer_cursor_surface_committed(struct weston_surface *es,
 	}
 }
 
+__attribute__((visibility("default")))
+float pointer_angle = 0.0;
 static void
 pointer_set_cursor(struct wl_client *client, struct wl_resource *resource,
 		   uint32_t serial, struct wl_resource *surface_resource,
@@ -2755,6 +2758,14 @@ pointer_set_cursor(struct wl_client *client, struct wl_resource *resource,
 		weston_surface_set_label_func(surface,
 					    pointer_cursor_surface_get_label);
 		pointer->sprite = weston_view_create(surface);
+		weston_matrix_init(&pointer->sprite_transform.matrix);
+		float dx = -x;
+		float dy = -y;
+		weston_matrix_translate(&pointer->sprite_transform.matrix, dx, dy, 0);
+		weston_matrix_rotate_xy(&pointer->sprite_transform.matrix, cos(pointer_angle), sin(pointer_angle));
+		weston_matrix_translate(&pointer->sprite_transform.matrix, -dx, -dy, 0);
+		wl_list_insert(&pointer->sprite->geometry.transformation_list, &pointer->sprite_transform.link);
+		pointer->sprite->transform.enabled = true;
 	}
 
 	pointer->hotspot_x = x;

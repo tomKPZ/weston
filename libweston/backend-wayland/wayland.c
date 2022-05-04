@@ -1763,6 +1763,7 @@ input_handle_button(void *data, struct wl_pointer *pointer,
 	}
 }
 
+extern float pointer_angle;
 static void
 input_handle_axis(void *data, struct wl_pointer *pointer,
 		  uint32_t time, uint32_t axis, wl_fixed_t value)
@@ -1774,6 +1775,21 @@ input_handle_axis(void *data, struct wl_pointer *pointer,
 	weston_event.axis = axis;
 	weston_event.value = wl_fixed_to_double(value);
 	weston_event.has_discrete = false;
+
+	if (axis == 0) {
+		pointer_angle += weston_event.value / 1024;
+		struct weston_pointer* p = weston_seat_get_pointer(&input->base);
+		float dx = -p->hotspot_x;
+		float dy = -p->hotspot_y;
+		weston_matrix_init(&p->sprite_transform.matrix);
+		weston_matrix_translate(&p->sprite_transform.matrix, dx, dy, 0);
+		weston_matrix_rotate_xy(&p->sprite_transform.matrix, cos(pointer_angle), sin(pointer_angle));
+		weston_matrix_translate(&p->sprite_transform.matrix, -dx, -dy, 0);
+		if (p->sprite) {
+			weston_view_geometry_dirty(p->sprite);
+			weston_view_schedule_repaint(p->sprite);
+		}
+	}
 
 	if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL &&
 	    input->vert.has_discrete) {

@@ -531,6 +531,11 @@ struct weston_pointer {
 	struct weston_view *sprite;
 	struct wl_listener sprite_destroy_listener;
 	int32_t hotspot_x, hotspot_y;
+	struct {
+		struct weston_matrix matrix;
+		struct wl_list link;
+	} sprite_transform;
+
 
 	struct weston_pointer_grab *grab;
 	struct weston_pointer_grab default_grab;
